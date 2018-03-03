@@ -106,13 +106,31 @@ public abstract class AbstractOslcRdfXmlProvider
 										 final MediaType	 actualMediaType,
 										 final MediaType ... requiredMediaTypes)
 	{
-		if (type.getAnnotation(OslcResourceShape.class) != null
+		// a JAX-RS framework will only call this method if all annotations match
+		return type.getAnnotation(OslcResourceShape.class) != null
 				|| type.getAnnotation(OslcNotQueryResult.class) != null
-				|| IResource.class.isAssignableFrom(type)
-				)
+				|| IResource.class.isAssignableFrom(type);
+
+	}
+
+	protected static boolean isReadable(final Class<?>		type,
+			final MediaType		actualMediaType,
+			final MediaType ... requiredMediaTypes)
+	{
+		return type.getAnnotation(OslcResourceShape.class) != null
+				|| IResource.class.isAssignableFrom(type);
+
+	}
+
+	protected static boolean isCompatible(final MediaType actualMediaType,
+			final MediaType... requiredMediaTypes)
+	{
+		for (final MediaType requiredMediaType : requiredMediaTypes)
 		{
-			// We do not have annotations when running from the non-web client.
-			return isCompatible(actualMediaType, requiredMediaTypes);
+			if (requiredMediaType.isCompatible(actualMediaType))
+			{
+				return true;
+			}
 		}
 
 		return false;
@@ -325,34 +343,6 @@ public abstract class AbstractOslcRdfXmlProvider
 		throw new IllegalArgumentException("Base media type can't be matched to any writer");
 	}
 
-	protected static boolean isReadable(final Class<?>		type,
-										final MediaType		actualMediaType,
-										final MediaType ... requiredMediaTypes)
-	{
-		if (type.getAnnotation(OslcResourceShape.class) != null)
-		{
-			if (isCompatible(actualMediaType, requiredMediaTypes))
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	protected static boolean isCompatible(final MediaType actualMediaType,
-			final MediaType... requiredMediaTypes)
-	{
-			for (final MediaType requiredMediaType : requiredMediaTypes)
-			{
-				if (requiredMediaType.isCompatible(actualMediaType))
-				{
-					return true;
-				}
-			}
-
-		return false;
-	}
 
 	protected Object[] readFrom(final Class<?>						 type,
 								final MediaType						 mediaType,
