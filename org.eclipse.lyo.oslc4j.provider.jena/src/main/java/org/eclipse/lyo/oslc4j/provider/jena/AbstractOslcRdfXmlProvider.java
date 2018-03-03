@@ -21,6 +21,8 @@ package org.eclipse.lyo.oslc4j.provider.jena;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.annotation.Annotation;
+import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -33,7 +35,12 @@ import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.ResponseBuilder;
 import javax.ws.rs.ext.Providers;
-
+import org.apache.jena.rdf.model.Model;
+import org.apache.jena.rdf.model.ModelFactory;
+import org.apache.jena.rdf.model.RDFReader;
+import org.apache.jena.rdf.model.RDFWriter;
+import org.apache.jena.riot.RDFLanguages;
+import org.apache.jena.util.FileUtils;
 import org.eclipse.lyo.oslc4j.core.OSLC4JConstants;
 import org.eclipse.lyo.oslc4j.core.OSLC4JUtils;
 import org.eclipse.lyo.oslc4j.core.annotation.OslcNotQueryResult;
@@ -59,6 +66,25 @@ public abstract class AbstractOslcRdfXmlProvider
 {
 	private final static Logger log                      = LoggerFactory.getLogger(
 			AbstractOslcRdfXmlProvider.class);
+
+	/**
+	 * System property {@value} : When "true", always abbreviate RDF/XML, even
+	 * when asked for application/rdf+xml. Otherwise, abbreviated RDF/XML is
+	 * only returned when application/xml is requested. Does not affect
+	 * text/turtle responses.
+	 *
+	 * @see RdfXmlAbbreviatedWriter
+	 */
+	@Deprecated
+	public static final String OSLC4J_ALWAYS_XML_ABBREV		  = "org.eclipse.lyo.oslc4j.alwaysXMLAbbrev";
+
+	/**
+	 * System property {@value} : When "true" (default), fail on when reading a
+	 * property value that is not a legal instance of a datatype. When "false",
+	 * skip over invalid values in extended properties.
+	 */
+	@Deprecated
+	public static final String OSLC4J_STRICT_DATATYPES		 = "org.eclipse.lyo.oslc4j.strictDatatypes";
 
 	private static final Annotation[] ANNOTATIONS_EMPTY_ARRAY = new Annotation[0];
 	private static final Class<Error> CLASS_OSLC_ERROR		  = Error.class;
@@ -148,16 +174,14 @@ public abstract class AbstractOslcRdfXmlProvider
 																responseInfo,
 																objects,
 																properties);
-			RDFWriter writer;
-			if	(serializationLanguage.equals(FileUtils.langXMLAbbrev)) {
-				writer = new RdfXmlAbbreviatedWriter();
-			} else {
-				writer = model.getWriter(serializationLanguage);
-			}
-			writer.setProperty("showXmlDeclaration", "false");
-			writer.setErrorHandler(ERROR_HANDLER);
+			RDFWriter writer = getRdfWriter(serializationLanguage, model);
 
-			if (! serializationLanguage.equals(FileUtils.langTurtle)) {
+			if (serializationLanguage.equals(FileUtils.langXML) || serializationLanguage.equals(FileUtils.langXMLAbbrev))
+			{
+				// XML (and Jena) default to UTF-8, but many libs default to ASCII, so need
+				// to set this explicitly
+				writer.setProperty("showXmlDeclaration",
+								   "false");
 				String xmlDeclaration = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
 				outputStream.write(xmlDeclaration.getBytes());
 			}
@@ -167,6 +191,22 @@ public abstract class AbstractOslcRdfXmlProvider
 			log.warn(MessageExtractor.getMessage("ErrorSerializingResource"), exception);
 			throw new WebApplicationException(exception);
 		}
+	}
+
+	private RDFWriter getRdfWriter(final String serializationLanguage, final Model model) {
+		RDFWriter writer = null;
+		if	(serializationLanguage.equals(FileUtils.langXMLAbbrev))
+        {
+            writer = new RdfXmlAbbreviatedWriter();
+        }
+        else
+        {
+            writer = model.getWriter(serializationLanguage);
+        }
+		writer.setProperty("showXmlDeclaration",
+                           "false");
+		writer.setErrorHandler(ERROR_HANDLER);
+		return writer;
 	}
 
 	protected void writeTo(final boolean queryResult, final Object[] objects,
@@ -241,18 +281,48 @@ public abstract class AbstractOslcRdfXmlProvider
 		// Determine whether to serialize in xml or abreviated xml based upon mediatype.
 		// application/rdf+xml yields xml
 		// applicaton/xml yields abbreviated xml
-		if (OslcMediaType.TEXT_TURTLE_TYPE.equals(baseMediaType))
-		{
-			return FileUtils.langTurtle;
+
+		if(baseMediaType == null) {
+			throw new IllegalArgumentException("Base media type can't be null");
 		}
 
-		if (OslcMediaType.APPLICATION_RDF_XML_TYPE.isCompatible(baseMediaType) &&
-			!OSLC4JUtils.alwaysAbbrevXML())
-		{
-			return FileUtils.langXML;
+		List<Map.Entry<MediaType, String>> mediaPairs = new ArrayList<>();
+		mediaPairs.add(new AbstractMap.SimpleEntry<>(OslcMediaType.TEXT_TURTLE_TYPE,
+													 RDFLanguages.strLangTurtle
+		));
+		mediaPairs.add(new AbstractMap.SimpleEntry<>(OslcMediaType.APPLICATION_JSON_LD_TYPE,
+													 RDFLanguages.strLangJSONLD
+		));
+		// TODO Andrew@2018-03-03: switch to OSLC4JUtils once 118569 is merged
+		// TODO Andrew@2018-03-03: refactor this list to build once after switching to OSLC4JUtils
+		if ("true".equals(System.getProperty(OSLC4J_ALWAYS_XML_ABBREV))) {
+			// TODO Andrew@2018-03-03: handle ABBREV consistent with the rest
+			// application/rdf+xml will be forcefully abbreviated
+			mediaPairs.add(new AbstractMap.SimpleEntry<>(OslcMediaType.APPLICATION_RDF_XML_TYPE,
+														 FileUtils.langXMLAbbrev
+			));
+		} else {
+			mediaPairs.add(new AbstractMap.SimpleEntry<>(OslcMediaType.APPLICATION_RDF_XML_TYPE,
+														 RDFLanguages.strLangRDFXML
+			));
+
+		}
+		// application/xml will be abbreviated for compat reasons
+		mediaPairs.add(new AbstractMap.SimpleEntry<>(OslcMediaType.APPLICATION_XML_TYPE,
+													 FileUtils.langXMLAbbrev
+		));
+
+		for (Map.Entry<MediaType, String> mediaPair : mediaPairs) {
+			if (baseMediaType.isCompatible(mediaPair.getKey())) {
+				log.trace("Using '{}' writer for '{}' Accept media type",
+						  mediaPair.getValue(),
+						  mediaPair.getKey()
+				);
+				return mediaPair.getValue();
+			}
 		}
 
-		return FileUtils.langXMLAbbrev;
+		throw new IllegalArgumentException("Base media type can't be matched to any writer");
 	}
 
 	protected static boolean isReadable(final Class<?>		type,
@@ -292,15 +362,7 @@ public abstract class AbstractOslcRdfXmlProvider
 	{
 		final Model model = ModelFactory.createDefaultModel();
 
-		RDFReader reader = null;
-
-		if (mediaType != null && mediaType.isCompatible(OslcMediaType.TEXT_TURTLE_TYPE))
-		{
-			reader=model.getReader(FileUtils.langTurtle);
-		} else {
-			reader = model.getReader(); // Default reader handles both xml and abbreviated xml
-		}
-		reader.setErrorHandler(ERROR_HANDLER);
+		RDFReader reader = getRdfReader(mediaType, model);
 
 		try
 		{
@@ -310,12 +372,9 @@ public abstract class AbstractOslcRdfXmlProvider
 			// for an example:
 			// http://open-services.net/bin/view/Main/CmSpecificationV2?sortcol=table;up=#Labels_for_Relationships
 
-			reader.read(model,
-						inputStream,
-						"");
+			reader.read(model, inputStream, "");
 
-			return JenaModelHelper.fromJenaModel(model,
-												 type);
+			return JenaModelHelper.fromJenaModel(model, type);
 		}
 		catch (final Exception exception)
 		{
@@ -324,6 +383,19 @@ public abstract class AbstractOslcRdfXmlProvider
 																	  mediaType,
 																	  map));
 		}
+	}
+
+	private RDFReader getRdfReader(final MediaType mediaType, final Model model) {
+		RDFReader reader = null;
+		final String language = getSerializationLanguage(mediaType);
+		if (language.equals(FileUtils.langXMLAbbrev))
+		{
+			reader = model.getReader(); // Default reader handles both xml and abbreviated xml
+		} else {
+			reader=model.getReader(language);
+		}
+		reader.setErrorHandler(ERROR_HANDLER);
+		return reader;
 	}
 
 	protected Response buildBadRequestResponse(final Exception				   exception,

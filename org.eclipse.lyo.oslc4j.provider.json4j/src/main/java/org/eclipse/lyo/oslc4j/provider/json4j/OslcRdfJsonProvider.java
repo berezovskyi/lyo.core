@@ -47,6 +47,10 @@ import org.eclipse.lyo.oslc4j.core.model.ResponseInfo;
 import org.eclipse.lyo.oslc4j.core.model.ResponseInfoArray;
 import org.eclipse.lyo.oslc4j.core.model.ResponseInfoCollection;
 
+/**
+ * Use JSON-LD support in Jena provider.
+ */
+@Deprecated
 @Provider
 @Produces(OslcMediaType.APPLICATION_JSON)
 @Consumes(OslcMediaType.APPLICATION_JSON)

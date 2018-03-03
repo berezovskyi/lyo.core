@@ -46,10 +46,11 @@ public interface OSLC4JConstants {
      * abbreviated RDF/XML is only returned when application/xml is requested. Does not affect
      * text/turtle responses.
      */
-    String OSLC4J_ALWAYS_XML_ABBREV = "org.eclipse.lyo.oslc4j" + "" + "" + ".alwaysXMLAbbrev";
+    String OSLC4J_ALWAYS_XML_ABBREV = "org.eclipse.lyo.oslc4j.alwaysXMLAbbrev";
     /**
      * When "true" (default), fail on when reading a property value that is not a legal instance of
      * a datatype. When "false", skip over invalid values in extended properties.
      */
     String OSLC4J_STRICT_DATATYPES  = "org.eclipse.lyo.oslc4j.strictDatatypes";
+
 }
